@@ -1,0 +1,23 @@
+Port 22
+ListenAddress 0.0.0.0
+AddressFamily any
+
+# Certificate-based authentication via Vault-signed SSH certs
+PubkeyAuthentication yes
+TrustedUserCAKeys /etc/ssh/trusted-user-ca-keys.pem
+
+# No password auth — credentials must come from Vault
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+PermitRootLogin no
+UsePAM no
+
+AllowUsers ubuntu
+
+# Enable PTY for interactive-style commands
+PermitTTY yes
+
+PrintMotd no
+PrintLastLog no
+AcceptEnv LANG LC_*
+Subsystem sftp /usr/lib/openssh/sftp-server

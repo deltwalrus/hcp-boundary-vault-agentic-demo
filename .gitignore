@@ -1,0 +1,19 @@
+.env
+*.env.local
+
+# Boundary worker state
+boundary/auth/
+/tmp/boundary-*
+
+# Vault audit log (lives inside the container, but just in case)
+vault/audit.log
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# macOS
+.DS_Store
