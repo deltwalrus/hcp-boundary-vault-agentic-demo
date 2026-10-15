@@ -75,12 +75,12 @@ fi
 # ── 2. Find (or create) the org scope ─────────────────────────────────────────
 echo ""
 echo "▶ Finding organisation scope..."
-ORG_SCOPE_ID=$(boundary scopes list -scope-id=global -format=json \
+ORG_SCOPE_ID=$(boundary scopes list -token=env://BOUNDARY_TOKEN -scope-id=global -format=json \
     | jq -r '.items // [] | .[] | select(.type=="org") | .id' | head -1)
 
 if [ -z "$ORG_SCOPE_ID" ]; then
     echo "  No org scope exists yet — creating one..."
-    ORG_SCOPE_ID=$(boundary scopes create \
+    ORG_SCOPE_ID=$(boundary scopes create -token=env://BOUNDARY_TOKEN \
         -scope-id=global \
         -name="incident-response-demo" \
         -description="Agentic AI incident response demo" \
@@ -93,11 +93,11 @@ fi
 # ── 3. Create project scope ───────────────────────────────────────────────────
 echo ""
 echo "▶ Creating project 'incident-response'..."
-PROJECT_ID=$(boundary scopes list -scope-id="${ORG_SCOPE_ID}" -format=json \
+PROJECT_ID=$(boundary scopes list -token=env://BOUNDARY_TOKEN -scope-id="${ORG_SCOPE_ID}" -format=json \
     | jq -r '.items[]? | select(.name=="incident-response") | .id' || true)
 
 if [ -z "$PROJECT_ID" ]; then
-    PROJECT_ID=$(boundary scopes create \
+    PROJECT_ID=$(boundary scopes create -token=env://BOUNDARY_TOKEN \
         -scope-id="${ORG_SCOPE_ID}" \
         -name="incident-response" \
         -description="Agentic AI incident response demo" \
@@ -110,11 +110,11 @@ fi
 # ── 4. Static host catalog ────────────────────────────────────────────────────
 echo ""
 echo "▶ Creating static host catalog 'local-docker'..."
-CATALOG_ID=$(boundary host-catalogs list -scope-id="${PROJECT_ID}" -format=json \
+CATALOG_ID=$(boundary host-catalogs list -token=env://BOUNDARY_TOKEN -scope-id="${PROJECT_ID}" -format=json \
     | jq -r '.items[]? | select(.name=="local-docker") | .id' || true)
 
 if [ -z "$CATALOG_ID" ]; then
-    CATALOG_ID=$(boundary host-catalogs create static \
+    CATALOG_ID=$(boundary host-catalogs create static -token=env://BOUNDARY_TOKEN \
         -scope-id="${PROJECT_ID}" \
         -name="local-docker" \
         -description="Docker Compose targets (accessible via local Boundary worker)" \
@@ -130,10 +130,10 @@ echo "▶ Creating hosts..."
 create_host() {
     local NAME=$1 ADDR=$2
     local EXISTING
-    EXISTING=$(boundary hosts list -host-catalog-id="${CATALOG_ID}" -format=json \
+    EXISTING=$(boundary hosts list -token=env://BOUNDARY_TOKEN -host-catalog-id="${CATALOG_ID}" -format=json \
         | jq -r ".items[]? | select(.name==\"${NAME}\") | .id" || true)
     if [ -z "$EXISTING" ]; then
-        boundary hosts create static \
+        boundary hosts create static -token=env://BOUNDARY_TOKEN \
             -host-catalog-id="${CATALOG_ID}" \
             -name="${NAME}" \
             -address="${ADDR}" \
@@ -154,10 +154,10 @@ echo "▶ Creating host sets..."
 create_host_set() {
     local NAME=$1
     local EXISTING
-    EXISTING=$(boundary host-sets list -host-catalog-id="${CATALOG_ID}" -format=json \
+    EXISTING=$(boundary host-sets list -token=env://BOUNDARY_TOKEN -host-catalog-id="${CATALOG_ID}" -format=json \
         | jq -r ".items[]? | select(.name==\"${NAME}\") | .id" || true)
     if [ -z "$EXISTING" ]; then
-        boundary host-sets create static \
+        boundary host-sets create static -token=env://BOUNDARY_TOKEN \
             -host-catalog-id="${CATALOG_ID}" \
             -name="${NAME}" \
             -format=json | jq -r '.item.id'
@@ -169,8 +169,8 @@ create_host_set() {
 WEB_SET_ID=$(create_host_set "web-app-hosts")
 DB_SET_ID=$(create_host_set  "db-hosts")
 
-boundary host-sets add-hosts -id="${WEB_SET_ID}" -host="${WEB_HOST_ID}" 2>/dev/null || true
-boundary host-sets add-hosts -id="${DB_SET_ID}"  -host="${DB_HOST_ID}"  2>/dev/null || true
+boundary host-sets add-hosts -token=env://BOUNDARY_TOKEN -id="${WEB_SET_ID}" -host="${WEB_HOST_ID}" 2>/dev/null || true
+boundary host-sets add-hosts -token=env://BOUNDARY_TOKEN -id="${DB_SET_ID}"  -host="${DB_HOST_ID}"  2>/dev/null || true
 echo "  web-app host set: ${WEB_SET_ID}"
 echo "  db host set:      ${DB_SET_ID}"
 
@@ -180,10 +180,10 @@ echo "▶ Creating targets..."
 create_target() {
     local TYPE=$1 NAME=$2 PORT=$3
     local EXISTING
-    EXISTING=$(boundary targets list -scope-id="${PROJECT_ID}" -format=json \
+    EXISTING=$(boundary targets list -token=env://BOUNDARY_TOKEN -scope-id="${PROJECT_ID}" -format=json \
         | jq -r ".items[]? | select(.name==\"${NAME}\") | .id" || true)
     if [ -z "$EXISTING" ]; then
-        boundary targets create "${TYPE}" \
+        boundary targets create "${TYPE}" -token=env://BOUNDARY_TOKEN \
             -scope-id="${PROJECT_ID}" \
             -name="${NAME}" \
             -default-port="${PORT}" \
@@ -198,8 +198,8 @@ create_target() {
 SSH_TARGET_ID=$(create_target tcp demo-web-app 2222)
 DB_TARGET_ID=$(create_target  tcp postgres     5432)
 
-boundary targets add-host-sources -id="${SSH_TARGET_ID}" -host-source="${WEB_SET_ID}" 2>/dev/null || true
-boundary targets add-host-sources -id="${DB_TARGET_ID}"  -host-source="${DB_SET_ID}"  2>/dev/null || true
+boundary targets add-host-sources -token=env://BOUNDARY_TOKEN -id="${SSH_TARGET_ID}" -host-source="${WEB_SET_ID}" 2>/dev/null || true
+boundary targets add-host-sources -token=env://BOUNDARY_TOKEN -id="${DB_TARGET_ID}"  -host-source="${DB_SET_ID}"  2>/dev/null || true
 
 echo "  SSH target (demo-web-app): ${SSH_TARGET_ID}"
 echo "  DB  target (postgres):     ${DB_TARGET_ID}"
@@ -211,18 +211,18 @@ AGENT_PASSWORD="${BOUNDARY_AGENT_PASSWORD:-$(openssl rand -base64 16)}"
 export AGENT_PASSWORD
 echo ""
 echo "▶ Creating managed account 'demo-agent'..."
-ACCT_ID=$(boundary accounts list -auth-method-id="${AUTH_ID}" -format=json \
+ACCT_ID=$(boundary accounts list -token=env://BOUNDARY_TOKEN -auth-method-id="${AUTH_ID}" -format=json \
     | jq -r '.items[]? | select(.attributes.login_name=="demo-agent") | .id' || true)
 
 if [ -z "$ACCT_ID" ]; then
-    ACCT_ID=$(boundary accounts create password \
+    ACCT_ID=$(boundary accounts create password -token=env://BOUNDARY_TOKEN \
         -auth-method-id="${AUTH_ID}" \
         -login-name="demo-agent" \
         -password env://AGENT_PASSWORD \
         -format=json | jq -r '.item.id')
     echo "  Created account: ${ACCT_ID}"
 else
-    boundary accounts set-password -id="${ACCT_ID}" -password env://AGENT_PASSWORD -format=json > /dev/null
+    boundary accounts set-password -token=env://BOUNDARY_TOKEN -id="${ACCT_ID}" -password env://AGENT_PASSWORD -format=json > /dev/null
     echo "  Already exists: ${ACCT_ID} (password reset)"
 fi
 
@@ -254,22 +254,22 @@ echo "  User: ${AGENT_USER_ID}"
 # `type=target;actions=list` — not enough to actually open a session.
 echo ""
 echo "▶ Granting demo-agent target access..."
-ROLE_ID=$(boundary roles list -scope-id="${PROJECT_ID}" -format=json \
+ROLE_ID=$(boundary roles list -token=env://BOUNDARY_TOKEN -scope-id="${PROJECT_ID}" -format=json \
     | jq -r '.items[]? | select(.name=="demo-agent-access") | .id' || true)
 
 if [ -z "$ROLE_ID" ]; then
-    ROLE_ID=$(boundary roles create \
+    ROLE_ID=$(boundary roles create -token=env://BOUNDARY_TOKEN \
         -scope-id="${PROJECT_ID}" \
         -name="demo-agent-access" \
         -description="Grants demo-agent authorize-session on incident-response targets" \
         -format=json | jq -r '.item.id')
-    boundary roles add-grants -id="${ROLE_ID}" -grant="ids=*;type=target;actions=authorize-session" -format=json > /dev/null
+    boundary roles add-grants -token=env://BOUNDARY_TOKEN -id="${ROLE_ID}" -grant="ids=*;type=target;actions=authorize-session" -format=json > /dev/null
     echo "  Created role: ${ROLE_ID}"
 else
     echo "  Already exists: ${ROLE_ID}"
 fi
 
-boundary roles add-principals -id="${ROLE_ID}" -principal="${AGENT_USER_ID}" 2>/dev/null || true
+boundary roles add-principals -token=env://BOUNDARY_TOKEN -id="${ROLE_ID}" -principal="${AGENT_USER_ID}" 2>/dev/null || true
 echo "  Principal attached: ${AGENT_USER_ID}"
 
 # ── 7. Write outputs ──────────────────────────────────────────────────────────

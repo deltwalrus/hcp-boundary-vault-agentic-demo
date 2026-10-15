@@ -82,10 +82,29 @@ elif [ -n "$TOKEN" ]; then
         -format=json | jq -r '.item.attributes.token')
 
     WORKER_NAME="demo-worker-$(hostname -s 2>/dev/null | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9-' '-' || echo local)"
-    BOUNDARY_TOKEN="$ADMIN_TOKEN" boundary workers create worker-led \
+    export BOUNDARY_TOKEN="$ADMIN_TOKEN"
+
+    # Worker credentials only stay valid while the worker is online to rotate
+    # them, so after a long idle gap this machine re-registers — and the old
+    # record still holds the (unique) name. Replace it if it's not live.
+    STALE_ID=$(boundary workers list -token=env://BOUNDARY_TOKEN -scope-id=global -format=json \
+        | jq -r --arg n "$WORKER_NAME" '.items[]? | select(.name == $n)
+            | select(((.last_status_time // "1970-01-01T00:00:00Z") | sub("\\.[0-9]+Z$"; "Z") | fromdateiso8601) < (now - 300))
+            | .id')
+    if [ -n "$STALE_ID" ]; then
+        echo "  Removing this machine's previous (offline) worker record: ${STALE_ID}"
+        boundary workers delete -token=env://BOUNDARY_TOKEN -id="$STALE_ID" > /dev/null
+    fi
+
+    if ! CREATE_OUT=$(boundary workers create worker-led \
+        -token=env://BOUNDARY_TOKEN \
         -worker-generated-auth-token="$TOKEN" \
         -name="$WORKER_NAME" \
-        -format=json > /dev/null
+        -format=json 2>&1); then
+        echo "ERROR: worker registration failed:" >&2
+        echo "$CREATE_OUT" >&2
+        exit 1
+    fi
 
     echo "  ✓ Worker registered automatically — no UI step needed"
 
@@ -97,6 +116,35 @@ elif [ -n "$TOKEN" ]; then
 else
     echo "  WARNING: worker did not report a registration token or a successful" >&2
     echo "  auth within 30s. It may still be starting -- check the tailed log below." >&2
+fi
+
+# Sessions fail with error #133 until HCP has a route through its managed
+# ingress workers to this one (~10-30s after auth). No log line marks that
+# reliably, so probe it: authorize a session on the SSH target, then cancel it.
+echo "  Waiting for HCP to establish a session route to this worker..."
+ADMIN_TOKEN_PW="${BOUNDARY_ADMIN_PASSWORD:-${BOUNDARY_PASSWORD:-}}"
+export BOUNDARY_ADDR ADMIN_TOKEN_PW
+BOUNDARY_TOKEN=$(boundary authenticate password \
+    -auth-method-id="${BOUNDARY_AUTH_METHOD_ID}" \
+    -login-name="${BOUNDARY_ADMIN_LOGIN_NAME:-admin}" \
+    -password env://ADMIN_TOKEN_PW \
+    -format=json | jq -r '.item.attributes.token')
+export BOUNDARY_TOKEN
+READY=false
+for _ in $(seq 1 30); do
+    PROBE_SESSION=$(boundary targets authorize-session -token=env://BOUNDARY_TOKEN \
+        -id="${BOUNDARY_SSH_TARGET_ID}" -format=json 2>/dev/null | jq -r '.item.session_id // empty' || true)
+    if [ -n "$PROBE_SESSION" ]; then
+        boundary sessions cancel -token=env://BOUNDARY_TOKEN -id="$PROBE_SESSION" > /dev/null 2>&1 || true
+        READY=true
+        break
+    fi
+    sleep 3
+done
+if [ "$READY" = true ]; then
+    echo "  ✓ READY — sessions can be brokered. Safe to start the agent."
+else
+    echo "  WARNING: no session route after 90s — agent sessions will fail with error #133." >&2
 fi
 
 echo ""
